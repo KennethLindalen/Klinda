@@ -231,43 +231,50 @@ public class PagedBPlusTree
     /// <param name="node">The internal node to handle.</param>
     private void HandleInternalUnderflow(PagedInternalNode node)
     {
+        // If the root has only one child, make it the new root
         if (node.PageId == _rootPageId)
         {
-            // If the root has only one child, make it the new root
             if (node.ChildrenPageIds.Count == 1)
             {
+                // Make the only child the new root
                 _rootPageId = node.ChildrenPageIds[0];
                 _metadata.RootPageId = _rootPageId;
                 _pageManager.WriteMetadata(_metadata);
+                // Log the deletion of the old root
                 _wal.LogDelete(node.PageId);
             }
 
             return;
         }
 
+        // Find the parent of the internal node
         var parent = PagedSearchService.FindParent(_rootPageId, node.PageId, LoadNode);
         int index = parent.ChildrenPageIds.IndexOf(node.PageId);
 
-        // Borrow from left sibling
+        // Check if the node can borrow from its left sibling
         if (index > 0)
         {
             var left = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index - 1]);
             if (left.Keys.Count > (_degree / 2) - 1)
             {
-                // Move separator from parent down to right
+                // Move the separator from the parent down to the right
                 var separator = parent.Keys[index - 1];
 
+                // Borrow a key and its child from the left sibling
                 var borrowedKey = left.Keys[^1];
                 var borrowedChild = left.ChildrenPageIds[^1];
 
                 left.Keys.RemoveAt(left.Keys.Count - 1);
                 left.ChildrenPageIds.RemoveAt(left.ChildrenPageIds.Count - 1);
 
+                // Insert the separator and the borrowed key and child into the right node
                 node.Keys.Insert(0, separator);
                 node.ChildrenPageIds.Insert(0, borrowedChild);
 
+                // Update the parent
                 parent.Keys[index - 1] = borrowedKey;
 
+                // Save the updated nodes
                 SaveNode(left);
                 SaveNode(node);
                 SaveNode(parent);
@@ -275,25 +282,30 @@ public class PagedBPlusTree
             }
         }
 
-        // Borrow from right sibling
+        // Check if the node can borrow from its right sibling
         if (index < parent.ChildrenPageIds.Count - 1)
         {
             var right = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index + 1]);
             if (right.Keys.Count > (_degree / 2) - 1)
             {
+                // Move the separator from the parent down to the left
                 var separator = parent.Keys[index];
 
+                // Borrow a key and its child from the right sibling
                 var borrowedKey = right.Keys[0];
                 var borrowedChild = right.ChildrenPageIds[0];
 
                 right.Keys.RemoveAt(0);
                 right.ChildrenPageIds.RemoveAt(0);
 
+                // Insert the separator and the borrowed key and child into the left node
                 node.Keys.Add(separator);
                 node.ChildrenPageIds.Add(borrowedChild);
 
+                // Update the parent
                 parent.Keys[index] = borrowedKey;
 
+                // Save the updated nodes
                 SaveNode(right);
                 SaveNode(node);
                 SaveNode(parent);
@@ -301,21 +313,25 @@ public class PagedBPlusTree
             }
         }
 
-        // No siblings to borrow from -> merge
+        // If the node can't borrow from either sibling, merge with one of them
         if (index > 0)
         {
             var left = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index - 1]);
             var separator = parent.Keys[index - 1];
 
+            // Add the separator and all the keys and children of the right node to the left node
             left.Keys.Add(separator);
             left.Keys.AddRange(node.Keys);
             left.ChildrenPageIds.AddRange(node.ChildrenPageIds);
 
+            // Remove the right node from the parent
             parent.Keys.RemoveAt(index - 1);
             parent.ChildrenPageIds.RemoveAt(index);
 
+            // Save the updated nodes
             SaveNode(left);
             SaveNode(parent);
+            // Log the deletion of the right node
             _wal.LogDelete(node.PageId);
         }
         else if (index < parent.ChildrenPageIds.Count - 1)
@@ -323,18 +339,23 @@ public class PagedBPlusTree
             var right = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index + 1]);
             var separator = parent.Keys[index];
 
+            // Add the separator and all the keys and children of the right node to the left node
             node.Keys.Add(separator);
             node.Keys.AddRange(right.Keys);
             node.ChildrenPageIds.AddRange(right.ChildrenPageIds);
 
+            // Remove the right node from the parent
             parent.Keys.RemoveAt(index);
             parent.ChildrenPageIds.RemoveAt(index + 1);
 
+            // Save the updated nodes
             SaveNode(node);
             SaveNode(parent);
+            // Log the deletion of the right node
             _wal.LogDelete(right.PageId);
         }
 
+        // Recursively handle the parent if it has too few keys
         if (parent.Keys.Count < (_degree / 2) - 1)
         {
             HandleInternalUnderflow(parent);
