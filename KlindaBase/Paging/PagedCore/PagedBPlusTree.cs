@@ -1,4 +1,5 @@
 ﻿using KlindaBase.Buffer;
+using KlindaBase.Services.PagedServices;
 using KlindaBase.WriteAhead;
 
 namespace KlindaBase.Paging.PagedCore;
@@ -11,7 +12,7 @@ public class PagedBPlusTree
     private MetadataPage _metadata;
     private int _rootPageId;
     private readonly int _degree;
-    
+
 
     /// <summary>
     /// Creates a new PagedBPlusTree with the given degree.
@@ -48,7 +49,6 @@ public class PagedBPlusTree
     }
 
 
-
     /// <summary>
     /// Inserts a key-value pair into the B+ tree.
     /// </summary>
@@ -83,6 +83,7 @@ public class PagedBPlusTree
             _pageManager.WriteMetadata(_metadata);
         }
     }
+
     /// <summary>
     /// Deletes the specified key from the B+ tree.
     /// </summary>
@@ -110,6 +111,12 @@ public class PagedBPlusTree
         leaf.Keys.RemoveAt(index);
         leaf.Values.RemoveAt(index);
 
+        if (leaf.Keys.Count < Math.Ceiling(_degree / 2.0))
+        {
+            HandleLeafUnderflow(leaf);
+        }
+
+
         // Log the changes to the leaf node
         var updatedPage = new Page
         {
@@ -119,10 +126,221 @@ public class PagedBPlusTree
         };
 
         // Log the updated page to the Write-Ahead Log
-        _wal.LogInsert(leaf.PageId, updatedPage.Data); 
+        _wal.LogInsert(leaf.PageId, updatedPage.Data);
         // Save the updated page to the page manager
         _buffer.PutPage(updatedPage);
     }
+
+    private void HandleLeafUnderflow(PagedLeafNode leaf)
+    {
+        var parent = PagedSearchService.FindParent(_rootPageId, leaf.PageId, LoadNode);
+        if (parent == null) return; // leaf is root
+
+        int index = parent.ChildrenPageIds.IndexOf(leaf.PageId);
+
+        // Venstre søsken
+        if (index > 0)
+        {
+            var left = (PagedLeafNode)LoadNode(parent.ChildrenPageIds[index - 1]);
+            if (left.Keys.Count > _degree / 2)
+            {
+                // Lån fra venstre
+                var lastKey = left.Keys[^1];
+                var lastVal = left.Values[^1];
+
+                left.Keys.RemoveAt(left.Keys.Count - 1);
+                left.Values.RemoveAt(left.Values.Count - 1);
+
+                leaf.Keys.Insert(0, lastKey);
+                leaf.Values.Insert(0, lastVal);
+
+                parent.Keys[index - 1] = leaf.Keys[0];
+
+                SaveNode(left);
+                SaveNode(leaf);
+                SaveNode(parent);
+                return;
+            }
+        }
+
+        // Høyre søsken
+        if (index < parent.ChildrenPageIds.Count - 1)
+        {
+            var right = (PagedLeafNode)LoadNode(parent.ChildrenPageIds[index + 1]);
+            if (right.Keys.Count > _degree / 2)
+            {
+                // Lån fra høyre
+                var firstKey = right.Keys[0];
+                var firstVal = right.Values[0];
+
+                right.Keys.RemoveAt(0);
+                right.Values.RemoveAt(0);
+
+                leaf.Keys.Add(firstKey);
+                leaf.Values.Add(firstVal);
+
+                parent.Keys[index] = right.Keys[0];
+
+                SaveNode(right);
+                SaveNode(leaf);
+                SaveNode(parent);
+                return;
+            }
+        }
+
+        // Ingen å låne fra → merge
+        if (index > 0)
+        {
+            var left = (PagedLeafNode)LoadNode(parent.ChildrenPageIds[index - 1]);
+            left.Keys.AddRange(leaf.Keys);
+            left.Values.AddRange(leaf.Values);
+            left.NextLeafPageId = leaf.NextLeafPageId;
+
+            parent.Keys.RemoveAt(index - 1);
+            parent.ChildrenPageIds.RemoveAt(index);
+
+            SaveNode(left);
+            SaveNode(parent);
+            _wal.LogDelete(leaf.PageId);
+        }
+        else if (index < parent.ChildrenPageIds.Count - 1)
+        {
+            var right = (PagedLeafNode)LoadNode(parent.ChildrenPageIds[index + 1]);
+            leaf.Keys.AddRange(right.Keys);
+            leaf.Values.AddRange(right.Values);
+            leaf.NextLeafPageId = right.NextLeafPageId;
+
+            parent.Keys.RemoveAt(index);
+            parent.ChildrenPageIds.RemoveAt(index + 1);
+
+            SaveNode(leaf);
+            SaveNode(parent);
+            _wal.LogDelete(right.PageId);
+        }
+
+        // Recurse om parent får underflyt
+        if (parent != null && parent.Keys.Count < Math.Ceiling(_degree / 2.0) - 1)
+        {
+            HandleInternalUnderflow(parent);
+        }
+    }
+
+    /// <summary>
+    /// Handles an internal node that has too few keys.
+    /// </summary>
+    /// <param name="node">The internal node to handle.</param>
+    private void HandleInternalUnderflow(PagedInternalNode node)
+    {
+        if (node.PageId == _rootPageId)
+        {
+            // If the root has only one child, make it the new root
+            if (node.ChildrenPageIds.Count == 1)
+            {
+                _rootPageId = node.ChildrenPageIds[0];
+                _metadata.RootPageId = _rootPageId;
+                _pageManager.WriteMetadata(_metadata);
+                _wal.LogDelete(node.PageId);
+            }
+
+            return;
+        }
+
+        var parent = PagedSearchService.FindParent(_rootPageId, node.PageId, LoadNode);
+        int index = parent.ChildrenPageIds.IndexOf(node.PageId);
+
+        // Borrow from left sibling
+        if (index > 0)
+        {
+            var left = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index - 1]);
+            if (left.Keys.Count > (_degree / 2) - 1)
+            {
+                // Move separator from parent down to right
+                var separator = parent.Keys[index - 1];
+
+                var borrowedKey = left.Keys[^1];
+                var borrowedChild = left.ChildrenPageIds[^1];
+
+                left.Keys.RemoveAt(left.Keys.Count - 1);
+                left.ChildrenPageIds.RemoveAt(left.ChildrenPageIds.Count - 1);
+
+                node.Keys.Insert(0, separator);
+                node.ChildrenPageIds.Insert(0, borrowedChild);
+
+                parent.Keys[index - 1] = borrowedKey;
+
+                SaveNode(left);
+                SaveNode(node);
+                SaveNode(parent);
+                return;
+            }
+        }
+
+        // Borrow from right sibling
+        if (index < parent.ChildrenPageIds.Count - 1)
+        {
+            var right = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index + 1]);
+            if (right.Keys.Count > (_degree / 2) - 1)
+            {
+                var separator = parent.Keys[index];
+
+                var borrowedKey = right.Keys[0];
+                var borrowedChild = right.ChildrenPageIds[0];
+
+                right.Keys.RemoveAt(0);
+                right.ChildrenPageIds.RemoveAt(0);
+
+                node.Keys.Add(separator);
+                node.ChildrenPageIds.Add(borrowedChild);
+
+                parent.Keys[index] = borrowedKey;
+
+                SaveNode(right);
+                SaveNode(node);
+                SaveNode(parent);
+                return;
+            }
+        }
+
+        // No siblings to borrow from -> merge
+        if (index > 0)
+        {
+            var left = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index - 1]);
+            var separator = parent.Keys[index - 1];
+
+            left.Keys.Add(separator);
+            left.Keys.AddRange(node.Keys);
+            left.ChildrenPageIds.AddRange(node.ChildrenPageIds);
+
+            parent.Keys.RemoveAt(index - 1);
+            parent.ChildrenPageIds.RemoveAt(index);
+
+            SaveNode(left);
+            SaveNode(parent);
+            _wal.LogDelete(node.PageId);
+        }
+        else if (index < parent.ChildrenPageIds.Count - 1)
+        {
+            var right = (PagedInternalNode)LoadNode(parent.ChildrenPageIds[index + 1]);
+            var separator = parent.Keys[index];
+
+            node.Keys.Add(separator);
+            node.Keys.AddRange(right.Keys);
+            node.ChildrenPageIds.AddRange(right.ChildrenPageIds);
+
+            parent.Keys.RemoveAt(index);
+            parent.ChildrenPageIds.RemoveAt(index + 1);
+
+            SaveNode(node);
+            SaveNode(parent);
+            _wal.LogDelete(right.PageId);
+        }
+
+        if (parent.Keys.Count < (_degree / 2) - 1)
+        {
+            HandleInternalUnderflow(parent);
+        }
+    }
+
 
     public string Search(int key)
     {
@@ -142,7 +360,7 @@ public class PagedBPlusTree
             node = LoadNode(internalNode.ChildrenPageIds[i]);
         }
     }
-    
+
     /// <summary>
     /// Searches the B+ tree for all key-value pairs that have a key
     /// in the range [start, end].
@@ -258,7 +476,8 @@ public class PagedBPlusTree
         {
             PageId = _pageManager.AllocatePageId(),
             Keys = internalNode.Keys.GetRange(midIdx + 1, internalNode.Keys.Count - midIdx - 1),
-            ChildrenPageIds = internalNode.ChildrenPageIds.GetRange(midIdx + 1, internalNode.ChildrenPageIds.Count - midIdx - 1)
+            ChildrenPageIds =
+                internalNode.ChildrenPageIds.GetRange(midIdx + 1, internalNode.ChildrenPageIds.Count - midIdx - 1)
         };
 
         internalNode.Keys.RemoveRange(midIdx, internalNode.Keys.Count - midIdx);
@@ -295,6 +514,7 @@ public class PagedBPlusTree
         public PagedBPlusNode NewPage { get; private set; }
 
         public static InsertResult NoSplit() => new() { NeedsSplit = false };
+
         public static InsertResult Split(int key, PagedBPlusNode page) =>
             new() { NeedsSplit = true, SplitKey = key, NewPage = page };
     }
