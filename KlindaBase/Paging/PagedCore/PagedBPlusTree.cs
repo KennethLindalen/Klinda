@@ -110,7 +110,8 @@ public class PagedBPlusTree
         // Remove the key and its associated value from the leaf node
         leaf.Keys.RemoveAt(index);
         leaf.Values.RemoveAt(index);
-
+        _wal.LogDelete(node.PageId);
+        _pageManager.FreePage(node.PageId);
         if (leaf.Keys.Count < Math.Ceiling(_degree / 2.0))
         {
             HandleLeafUnderflow(leaf);

@@ -5,6 +5,8 @@ namespace KlindaBase.Paging;
 public class PageManager
 {
     private readonly string _filePath;
+    private PageFreeList _freeList;
+    
     private FileStream _stream;
     private int _nextPageId;
 
@@ -18,7 +20,76 @@ public class PageManager
         _stream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite);
         // Calculate the next available page id based on the current stream length.
         // The stream length should be a multiple of PageSize, which is the length of a page in bytes.
-        _nextPageId = (int)(_stream.Length / Page.PageSize);
+        _freeList = TryReadFreeList() ?? new PageFreeList();
+        _nextPageId = Math.Max(2, GetMaxPageIdOnDisk() + 1);
+    }
+    /// <summary>
+    /// Tries to read the free list from the file.
+    /// </summary>
+    /// <returns>The free list if it exists, otherwise null.</returns>
+    private PageFreeList? TryReadFreeList()
+    {
+        try
+        {
+            // The free list is stored in the page with page id 1.
+            var page = ReadPage(PageFreeList.PageId);
+            // Deserialize the page data to a free list.
+            return PageFreeList.Deserialize(page.Data);
+        }
+        catch
+        {
+            // If the page does not exist, return null.
+            return null;
+        }
+    }
+    /// <summary>
+    /// Calculates the maximum page id currently on disk.
+    /// </summary>
+    /// <returns>The maximum page id.</returns>
+    public int GetMaxPageIdOnDisk()
+    {
+        int maxPageId = -1;
+
+        _stream.Seek(0, SeekOrigin.Begin);
+        using var reader = new BinaryReader(_stream, System.Text.Encoding.UTF8, leaveOpen: true);
+
+        // Iterate over the file and find the maximum page id.
+        while (_stream.Position < _stream.Length)
+        {
+            long pos = _stream.Position;
+
+            int pageId = reader.ReadInt32();
+            byte pageType = reader.ReadByte();
+            int dataLength = reader.ReadInt32();
+
+            // Skip over the data for this page.
+            reader.BaseStream.Seek(dataLength, SeekOrigin.Current);
+
+            if (pageId > maxPageId)
+                maxPageId = pageId;
+        }
+
+        return maxPageId;
+    }
+
+    /// <summary>
+    /// Writes the free list to the file.
+    /// </summary>
+    /// <remarks>
+    /// The free list is stored in the page with page id 1.
+    /// </remarks>
+    public void WriteFreeList()
+    {
+        // Create a new page with the free list data.
+        var page = new Page
+        {
+            PageId = PageFreeList.PageId,
+            Type = PageType.Internal, // symbolsk
+            Data = _freeList.Serialize()
+        };
+
+        // Write the page to the file.
+        WritePage(page);
     }
 
     /// <summary>
@@ -27,10 +98,18 @@ public class PageManager
     /// <returns>The new page id.</returns>
     public int AllocatePageId()
     {
-        // The next page id is the current value of _nextPageId plus 1.
-        // This is done to ensure that the page ids are unique and that
-        // the allocation is thread-safe.
-        return Interlocked.Increment(ref _nextPageId) - 1;
+        if (_freeList.FreePageIds.Count > 0)
+        {
+            int reused = _freeList.FreePageIds[^1];
+            _freeList.FreePageIds.RemoveAt(_freeList.FreePageIds.Count - 1);
+            return reused;
+        }
+
+        return _nextPageId++;
+    }
+    public void FreePage(int pageId)
+    {
+        _freeList.FreePageIds.Add(pageId);
     }
 
     /// <summary>
