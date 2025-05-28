@@ -8,40 +8,63 @@ public class PagedBPlusTree
     private readonly PageManager _pageManager;
     private readonly BufferManager _buffer;
     private readonly WALLog _wal;
+    private MetadataPage _metadata;
     private int _rootPageId;
     private readonly int _degree;
     
 
+    /// <summary>
+    /// Creates a new PagedBPlusTree with the given degree.
+    /// </summary>
+    /// <param name="pageManager">The page manager to use for storing pages.</param>
+    /// <param name="wal">The Write-Ahead Log to use for logging inserts and deletes.</param>
+    /// <param name="degree">The degree of the B+ tree.</param>
     public PagedBPlusTree(PageManager pageManager, WALLog wal, int degree)
     {
         _pageManager = pageManager;
         _wal = wal;
         _buffer = new BufferManager(pageManager, wal);
-        _buffer.Recover();
-
         _degree = degree;
+
+        // Perform recovery by replaying the log
         _buffer.Recover();
 
-        if (_pageManager.AllocatePageId() == 0)
+        // Read the metadata page, which contains the id of the root page
+        _metadata = _pageManager.ReadMetadata();
+
+        if (_metadata == null)
         {
-            var root = new PagedLeafNode { PageId = 0 };
+            // If the metadata page is missing, create a new root page and write it to disk
+            var root = new PagedLeafNode { PageId = 1 };
             SaveNode(root);
-            _rootPageId = 0;
+
+            // Create a new metadata page with the id of the root page
+            _metadata = new MetadataPage { RootPageId = root.PageId };
+            _pageManager.WriteMetadata(_metadata);
         }
-        else
-        {
-            _rootPageId = 0; // TODO: ved reell recovery, last dette fra metadata
-        }
+
+        // Set the root page id
+        _rootPageId = _metadata.RootPageId;
     }
 
 
+
+    /// <summary>
+    /// Inserts a key-value pair into the B+ tree.
+    /// </summary>
+    /// <param name="key">The key to insert.</param>
+    /// <param name="value">The value associated with the key.</param>
     public void Insert(int key, string value)
     {
+        // Load the root node from the page manager
         var root = LoadNode(_rootPageId);
+        // Recursively insert the key-value pair
         var result = InsertRecursive(root, key, value);
 
+        // Check if the root needs to be split
         if (result.NeedsSplit)
         {
+            // The root was split, create a new root node
             var newRoot = new PagedInternalNode
             {
                 PageId = _pageManager.AllocatePageId(),
@@ -49,30 +72,45 @@ public class PagedBPlusTree
                 ChildrenPageIds = new() { root.PageId, result.NewPage.PageId }
             };
 
+            // Save the new page and new root node
             SaveNode(result.NewPage);
             SaveNode(newRoot);
+            // Update the runtime root page ID
             _rootPageId = newRoot.PageId;
+
+            // Important: Save the new root in the metadata
+            _metadata.RootPageId = _rootPageId;
+            _pageManager.WriteMetadata(_metadata);
         }
     }
+    /// <summary>
+    /// Deletes the specified key from the B+ tree.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
     public void Delete(int key)
     {
+        // Find the leaf node that contains the key
         var node = LoadNode(_rootPageId);
 
         while (node is PagedInternalNode internalNode)
         {
+            // Find the index in the internal node where the key should be inserted
             int i = 0;
             while (i < internalNode.Keys.Count && key >= internalNode.Keys[i]) i++;
+            // Recursively traverse the tree to find the leaf node
             node = LoadNode(internalNode.ChildrenPageIds[i]);
         }
 
+        // The node is now a leaf node
         var leaf = (PagedLeafNode)node;
         int index = leaf.Keys.IndexOf(key);
-        if (index == -1) return; // finnes ikke
+        if (index == -1) return;
 
+        // Remove the key and its associated value from the leaf node
         leaf.Keys.RemoveAt(index);
         leaf.Values.RemoveAt(index);
 
-        // Log sletting av hele noden – eller spesifikk sletting
+        // Log the changes to the leaf node
         var updatedPage = new Page
         {
             PageId = leaf.PageId,
@@ -80,7 +118,9 @@ public class PagedBPlusTree
             Data = PagedNodeSerializer.Serialize(leaf)
         };
 
-        _wal.LogInsert(leaf.PageId, updatedPage.Data); // logg ny versjon
+        // Log the updated page to the Write-Ahead Log
+        _wal.LogInsert(leaf.PageId, updatedPage.Data); 
+        // Save the updated page to the page manager
         _buffer.PutPage(updatedPage);
     }
 
