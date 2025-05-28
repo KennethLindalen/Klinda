@@ -142,6 +142,50 @@ public class PagedBPlusTree
             node = LoadNode(internalNode.ChildrenPageIds[i]);
         }
     }
+    
+    /// <summary>
+    /// Searches the B+ tree for all key-value pairs that have a key
+    /// in the range [start, end].
+    /// </summary>
+    /// <param name="start">The start of the range (inclusive).</param>
+    /// <param name="end">The end of the range (inclusive).</param>
+    /// <returns>A list of key-value pairs that match the search criteria.</returns>
+    public List<KeyValuePair<int, string>> RangeSearch(int start, int end)
+    {
+        var results = new List<KeyValuePair<int, string>>();
+
+        // Navigate down to the first leaf node that may contain "start"
+        var node = LoadNode(_rootPageId);
+        while (node is PagedInternalNode internalNode)
+        {
+            int i = 0;
+            while (i < internalNode.Keys.Count && start >= internalNode.Keys[i]) i++;
+            node = LoadNode(internalNode.ChildrenPageIds[i]);
+        }
+
+        // The node is now a leaf node
+        var leaf = (PagedLeafNode)node;
+
+        // Iterate over the leaf nodes, adding key-value pairs that are in the range
+        while (leaf != null)
+        {
+            for (int i = 0; i < leaf.Keys.Count; i++)
+            {
+                int k = leaf.Keys[i];
+                if (k > end) return results;
+                if (k >= start)
+                    results.Add(new KeyValuePair<int, string>(k, leaf.Values[i]));
+            }
+
+            // If the next leaf node is null, we can break out of the loop
+            if (leaf.NextLeafPageId == null) break;
+            // Otherwise, load the next leaf node and continue the loop
+            leaf = (PagedLeafNode)LoadNode(leaf.NextLeafPageId.Value);
+        }
+
+        return results;
+    }
+
 
     private InsertResult InsertRecursive(PagedBPlusNode node, int key, string value)
     {
