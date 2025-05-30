@@ -12,6 +12,8 @@ public class PagedBPlusTree
     private MetadataPage _metadata;
     private int _rootPageId;
     private readonly int _degree;
+    
+    public int RootPageId => _rootPageId;
 
 
     /// <summary>
@@ -20,33 +22,28 @@ public class PagedBPlusTree
     /// <param name="pageManager">The page manager to use for storing pages.</param>
     /// <param name="wal">The Write-Ahead Log to use for logging inserts and deletes.</param>
     /// <param name="degree">The degree of the B+ tree.</param>
-    public PagedBPlusTree(PageManager pageManager, WALLog wal, int degree)
+    public PagedBPlusTree(PageManager pageManager, WALLog wal, BufferManager buffer, int degree, int metadataPageId)
     {
         _pageManager = pageManager;
         _wal = wal;
-        _buffer = new BufferManager(pageManager, wal);
+        _buffer = buffer;
         _degree = degree;
 
-        // Perform recovery by replaying the log
-        _buffer.Recover();
-
-        // Read the metadata page, which contains the id of the root page
-        _metadata = _pageManager.ReadMetadata();
-
+        _metadata = _pageManager.ReadMetadata(metadataPageId);
         if (_metadata == null)
         {
-            // If the metadata page is missing, create a new root page and write it to disk
-            var root = new PagedLeafNode { PageId = 1 };
+            var root = new PagedLeafNode { PageId = _pageManager.AllocatePageId() };
             SaveNode(root);
-
-            // Create a new metadata page with the id of the root page
             _metadata = new MetadataPage { RootPageId = root.PageId };
-            _pageManager.WriteMetadata(_metadata);
+            _pageManager.WriteMetadata(metadataPageId, _metadata);
         }
 
-        // Set the root page id
         _rootPageId = _metadata.RootPageId;
     }
+
+    
+
+
     
     
     /// <summary>
