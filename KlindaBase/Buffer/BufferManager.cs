@@ -66,9 +66,29 @@ public class BufferManager : IDisposable
         }
 
         _dirtyPages.Clear();
-        _wal.Truncate();
+        _wal.Truncate(); // <- WAL komprimering
     }
 
+    /// <summary>
+    /// Evicts the least recently used page from the cache.
+    /// </summary>
+    private void EvictPage()
+    {
+        // Simple FIFO eviction, improve later with LRU
+        var pageIdToEvict = _cache.Keys.First();
+        if (_cache.TryGetValue(pageIdToEvict, out var page))
+        {
+            // If the page is dirty, write it back to disk
+            if (_dirtyPages.Contains(pageIdToEvict))
+            {
+                _pageManager.WritePage(page);
+                _dirtyPages.Remove(pageIdToEvict);
+            }
+
+            // Remove the page from the cache
+            _cache.Remove(pageIdToEvict);
+        }
+    }
     
     public void Dispose()
     {
