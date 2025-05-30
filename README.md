@@ -26,7 +26,7 @@
 ```csharp
 var stream = new FileStream("test.db", FileMode.OpenOrCreate, FileAccess.ReadWrite);
 var pageManager = new PageManager(stream);
-var wal = new WriteAheadLog("wal.log");
+var wal = new WALLog("wal.log");
 
 var db = new DbEngine(pageManager, wal);
 var service = new DbService(db);
