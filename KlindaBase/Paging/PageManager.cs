@@ -23,6 +23,9 @@ public class PageManager
         _freeList = TryReadFreeList() ?? new PageFreeList();
         _nextPageId = Math.Max(2, GetMaxPageIdOnDisk() + 1);
     }
+    
+    
+    
     /// <summary>
     /// Tries to read the free list from the file.
     /// </summary>
@@ -51,7 +54,7 @@ public class PageManager
         int maxPageId = -1;
 
         _stream.Seek(0, SeekOrigin.Begin);
-        using var reader = new BinaryReader(_stream, System.Text.Encoding.UTF8, leaveOpen: true);
+        using var reader = new BinaryReader(_stream, Encoding.UTF8, leaveOpen: true);
 
         // Iterate over the file and find the maximum page id.
         while (_stream.Position < _stream.Length)

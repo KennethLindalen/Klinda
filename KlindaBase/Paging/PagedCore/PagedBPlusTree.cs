@@ -47,7 +47,17 @@ public class PagedBPlusTree
         // Set the root page id
         _rootPageId = _metadata.RootPageId;
     }
-
+    
+    
+    /// <summary>
+    /// Flushes the buffer manager and persists the free list.
+    /// </summary>
+    public void Dispose()
+    {
+        _buffer.Flush();
+        _pageManager.WriteFreeList(); 
+        _pageManager.WriteMetadata(_metadata); 
+    }
 
     /// <summary>
     /// Inserts a key-value pair into the B+ tree.

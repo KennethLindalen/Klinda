@@ -1,4 +1,7 @@
 ﻿using KlindaBase.Core;
+using KlindaBase.Paging;
+using KlindaBase.Paging.PagedCore;
+using KlindaBase.WriteAhead;
 
 namespace KlindaBase;
 
@@ -6,52 +9,35 @@ class Program
 {
     static void Main()
     {
-        var tree = new BPlusTree(degree: 3);
+        // Create a new database file
+        var filePath = "test.db";
+        if (File.Exists(filePath))
+            File.Delete(filePath);
+        var pageManager = new PageManager(filePath);
+        var wal = new WALLog("wal.log");
+        var tree = new PagedBPlusTree(pageManager, wal, degree: 4);
 
-        Console.WriteLine("=== INSERT ===");
-        var data = new Dictionary<int, string>
+        // Insert some values into the tree
+        for (int i = 1; i <= 30; i++)
         {
-            { 10, "A" }, { 20, "B" }, { 5, "C" }, { 6, "D" },
-            { 12, "E" }, { 30, "F" }, { 7, "G" }, { 17, "H" }
-        };
-
-        foreach (var kvp in data)
-        {
-            Console.WriteLine($"Insert: {kvp.Key} -> {kvp.Value}");
-            tree.Insert(kvp.Key, kvp.Value);
+            tree.Insert(i, $"Value-{i}");
         }
 
-        Console.WriteLine("\n=== SEARCH ===");
-        foreach (var key in new[] { 6, 10, 17, 99 })
-        {
-            var result = tree.Search(key);
-            Console.WriteLine($"Search {key}: {result ?? "not found"}");
-        }
-
-        Console.WriteLine("\n=== RANGE SEARCH (6 to 20) ===");
-        var range = tree.RangeSearch(6, 20);
-        foreach (var kvp in range)
+        // Perform a range search
+        var results = tree.RangeSearch(10, 20);
+        Console.WriteLine("RangeSearch(10, 20):");
+        foreach (var kvp in results)
         {
             Console.WriteLine($"{kvp.Key} => {kvp.Value}");
         }
 
-        Console.WriteLine("\n=== DELETE ===");
-        foreach (var key in new[] { 6, 7, 10, 12 })
+        // Delete some values from the tree
+        for (int i = 5; i <= 10; i++)
         {
-            Console.WriteLine($"Delete: {key}");
-            tree.Delete(key);
+            tree.Delete(i);
         }
 
-        Console.WriteLine("\n=== POST-DELETE RANGE SEARCH (5 to 30) ===");
-        var postRange = tree.RangeSearch(5, 30);
-        foreach (var kvp in postRange)
-        {
-            Console.WriteLine($"{kvp.Key} => {kvp.Value}");
-        }
-
-        Console.WriteLine("\n=== DONE ===");
-        Console.WriteLine("\n=== PRINT TREE ===");
-        tree.PrintTree();
-
+        // Clean up
+        tree.Dispose();
     }
 }
