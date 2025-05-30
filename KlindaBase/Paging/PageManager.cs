@@ -180,6 +180,22 @@ public class PageManager
             Data = metadata.Serialize() // Serialize the metadata to a byte array
         });
     }
+    
+    /// <summary>
+    /// Writes the metadata to the page file using the specified page id.
+    /// </summary>
+    /// <param name="pageId">The id of the page to write the metadata to.</param>
+    /// <param name="metadata">The metadata page to write.</param>
+    public void WriteMetadata(int pageId, MetadataPage metadata)
+    {
+        // Create a new page with the specified page id, type, and serialized data
+        WritePage(new Page
+        {
+            PageId = pageId, // The id of the metadata page
+            Type = PageType.Internal, // Symbolic type for metadata
+            Data = metadata.Serialize() // Serialize the metadata to a byte array
+        });
+    }
 
     /// <summary>
     /// Reads the metadata page from the file.
@@ -200,6 +216,21 @@ public class PageManager
             return null;
         }
     }
+    
+    /// <summary>
+/// Reads the metadata page from the file using the specified page id.
+/// </summary>
+/// <param name="pageId">The id of the metadata page to read.</param>
+/// <returns>The deserialized metadata page.</returns>
+public MetadataPage ReadMetadata(int pageId)
+{
+    // Read the page with the given page id
+    var page = ReadPage(pageId);
+
+    // Deserialize the page data to a metadata page
+    return MetadataPage.Deserialize(page.Data);
+}
+    
 
     /// <summary>
     /// Closes the file stream associated with the page manager.
