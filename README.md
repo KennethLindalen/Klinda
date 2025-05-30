@@ -4,7 +4,7 @@
 
 ---
 
-## 🚀 Features
+## Features
 
 - ✅ Paged B+Tree with insert/search/delete
 - ✅ Buffer manager with eviction and auto-flush
@@ -21,7 +21,7 @@
 
 ---
 
-## 🧪 Example Usage
+## Example Usage
 
 ```csharp
 var stream = new FileStream("test.db", FileMode.OpenOrCreate, FileAccess.ReadWrite);
@@ -45,8 +45,8 @@ foreach (var r in results)
 
 db.Dispose();
 ```
-📌 Roadmap
-**Phase 1 – Schema & Table Management (🟢 In Progress)**
+Roadmap
+**Phase 1 – Schema & Table Management (In Progress)**
 
 - Store and load TableDefinition using SchemaPage
 - Assign a unique MetadataPageId per table
