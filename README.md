@@ -46,7 +46,7 @@ foreach (var r in results)
 db.Dispose();
 ```
 📌 Roadmap
-**Phase 1 – Schema & Table Management (🟢 In Progress)**
+**Phase 1 – Schema & Table Management (In Progress)**
 
 - Store and load TableDefinition using SchemaPage
 - Assign a unique MetadataPageId per table
