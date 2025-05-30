@@ -49,52 +49,52 @@ public class DbEngine : IDisposable
 
 
     /// <summary>
-/// Creates a new table with the specified name.
-/// </summary>
-/// <param name="name">The name of the table to create.</param>
-/// <exception cref="InvalidOperationException">Thrown if the table already exists.</exception>
-public void CreateTable(string name)
-{
-    // Check if a table with the given name already exists
-    if (_tables.ContainsKey(name))
-        throw new InvalidOperationException("Table already exists");
-
-    // Allocate a new metadata page ID for the table
-    var metadataPageId = _pageManager.AllocatePageId();
-
-    // Create a new B+ tree for the table with the allocated metadata page ID
-    var tree = new PagedBPlusTree(_pageManager, _wal, _buffer, degree: 4, metadataPageId: metadataPageId);
-    var rootId = tree.RootPageId;
-
-    // Define the new table with its ID, name, metadata page ID, and root page ID
-    var tableDefinition = new TableDefinition
+    /// Creates a new table with the specified name.
+    /// </summary>
+    /// <param name="name">The name of the table to create.</param>
+    /// <exception cref="InvalidOperationException">Thrown if the table already exists.</exception>
+    public void CreateTable(string name)
     {
-        TableId = _schema.Tables.Count + 1,
-        Name = name,
-        MetadataPageId = metadataPageId,
-        RootPageId = rootId
-    };
+        // Check if a table with the given name already exists
+        if (_tables.ContainsKey(name))
+            throw new InvalidOperationException("Table already exists");
 
-    // Add the table definition to the schema and the table to the dictionary
-    _schema.Tables.Add(tableDefinition);
-    _tables[name] = tree;
+        // Allocate a new metadata page ID for the table
+        var metadataPageId = _pageManager.AllocatePageId();
 
-    // Save the updated schema to disk
-    SaveSchema();
-}
+        // Create a new B+ tree for the table with the allocated metadata page ID
+        var tree = new PagedBPlusTree(_pageManager, _wal, _buffer, degree: 4, metadataPageId: metadataPageId);
+        var rootId = tree.RootPageId;
+
+        // Define the new table with its ID, name, metadata page ID, and root page ID
+        var tableDefinition = new TableDefinition
+        {
+            TableId = _schema.Tables.Count + 1,
+            Name = name,
+            MetadataPageId = metadataPageId,
+            RootPageId = rootId
+        };
+
+        // Add the table definition to the schema and the table to the dictionary
+        _schema.Tables.Add(tableDefinition);
+        _tables[name] = tree;
+
+        // Save the updated schema to disk
+        SaveSchema();
+    }
 
 
     /// <summary>
-/// Retrieves the B+ tree associated with the given table name.
-/// </summary>
-/// <param name="name">The name of the table.</param>
-/// <returns>The B+ tree corresponding to the table.</returns>
-/// <exception cref="KeyNotFoundException">Thrown if the table does not exist.</exception>
-public PagedBPlusTree GetTable(string name)
-{
-    // Retrieve the tree from the dictionary of tables
-    return _tables[name];
-}
+    /// Retrieves the B+ tree associated with the given table name.
+    /// </summary>
+    /// <param name="name">The name of the table.</param>
+    /// <returns>The B+ tree corresponding to the table.</returns>
+    /// <exception cref="KeyNotFoundException">Thrown if the table does not exist.</exception>
+    public PagedBPlusTree GetTable(string name)
+    {
+        // Retrieve the tree from the dictionary of tables
+        return _tables[name];
+    }
 
     /// <summary>
     /// Saves the schema to the page with the given page ID.
@@ -111,18 +111,18 @@ public PagedBPlusTree GetTable(string name)
     }
 
     /// <summary>
-/// Disposes of the resources used by the DbEngine.
-/// </summary>
-public void Dispose()
-{
-    // Dispose each B+ tree in the tables
-    foreach (var tree in _tables.Values)
-        tree.Dispose();
+    /// Disposes of the resources used by the DbEngine.
+    /// </summary>
+    public void Dispose()
+    {
+        // Dispose each B+ tree in the tables
+        foreach (var tree in _tables.Values)
+            tree.Dispose();
 
-    // Flush the buffer to persist any changes
-    _buffer.Flush();
-    
-    // Write the free list to disk
-    _pageManager.WriteFreeList();
-}
+        // Flush the buffer to persist any changes
+        _buffer.Flush();
+
+        // Write the free list to disk
+        _pageManager.WriteFreeList();
+    }
 }
